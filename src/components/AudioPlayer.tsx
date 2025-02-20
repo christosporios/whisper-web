@@ -1,29 +1,21 @@
-import { useEffect, useRef } from "react";
+import { forwardRef } from 'react';
 
-export default function AudioPlayer(props: {
+interface Props {
     audioUrl: string;
     mimeType: string;
-}) {
-    const audioPlayer = useRef<HTMLAudioElement>(null);
-    const audioSource = useRef<HTMLSourceElement>(null);
-
-    // Updates src when url changes
-    useEffect(() => {
-        if (audioPlayer.current && audioSource.current) {
-            audioSource.current.src = props.audioUrl;
-            audioPlayer.current.load();
-        }
-    }, [props.audioUrl]);
-
-    return (
-        <div className='flex relative z-10 p-4 w-full'>
-            <audio
-                ref={audioPlayer}
-                controls
-                className='w-full h-14 rounded-lg bg-white shadow-xl shadow-black/5 ring-1 ring-slate-700/10'
-            >
-                <source ref={audioSource} type={props.mimeType}></source>
-            </audio>
-        </div>
-    );
 }
+
+const AudioPlayer = forwardRef<HTMLAudioElement, Props>(
+    ({ audioUrl, mimeType }, ref) => {
+        return (
+            <audio
+                ref={ref}
+                controls
+                className='w-full max-w-2xl'
+                src={audioUrl}
+            />
+        );
+    }
+);
+
+export default AudioPlayer;

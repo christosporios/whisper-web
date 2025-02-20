@@ -1,13 +1,14 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import axios from "axios";
 import Modal from "./modal/Modal";
 import { UrlInput } from "./modal/UrlInput";
 import AudioPlayer from "./AudioPlayer";
 import { TranscribeButton } from "./TranscribeButton";
 import Constants from "../utils/Constants";
-import { Transcriber } from "../hooks/useTranscriber";
+import { Transcriber, TranscriberData } from "../hooks/useTranscriber";
 import Progress from "./Progress";
 import AudioRecorder from "./AudioRecorder";
+import { convertAndSaveAudio } from "light-audio-converter";
 
 function titleCase(str: string) {
     str = str.toLowerCase();
@@ -129,20 +130,26 @@ export enum AudioSource {
     RECORDING = "RECORDING",
 }
 
-export function AudioManager(props: { transcriber: Transcriber }) {
+interface Props {
+    transcriber: Transcriber;
+    transcribedData?: TranscriberData;
+}
+
+export function AudioManager({ transcriber, transcribedData }: Props) {
     const [progress, setProgress] = useState<number | undefined>(undefined);
     const [audioData, setAudioData] = useState<
         | {
-              buffer: AudioBuffer;
-              url: string;
-              source: AudioSource;
-              mimeType: string;
-          }
+            buffer: AudioBuffer;
+            url: string;
+            source: AudioSource;
+            mimeType: string;
+        }
         | undefined
     >(undefined);
     const [audioDownloadUrl, setAudioDownloadUrl] = useState<
         string | undefined
     >(undefined);
+    const [audioDuration, setAudioDuration] = useState(0);
 
     const isAudioLoading = progress !== undefined;
 
@@ -237,15 +244,37 @@ export function AudioManager(props: { transcriber: Transcriber }) {
         }
     }, [audioDownloadUrl]);
 
+    const audioRef = useRef<HTMLAudioElement>(null);
+
+    // Connect the audio element to the transcriber
+    useEffect(() => {
+        transcriber.setAudioElement(audioRef.current);
+    }, [transcriber]);
+
+    // Add useEffect to track audio duration
+    useEffect(() => {
+        if (audioRef.current) {
+            const audio = audioRef.current;
+            if (audio.duration) {
+                setAudioDuration(audio.duration);
+            }
+            const updateDuration = () => setAudioDuration(audio.duration);
+            audio.addEventListener("loadedmetadata", updateDuration);
+            return () => {
+                audio.removeEventListener("loadedmetadata", updateDuration);
+            };
+        }
+    }, [audioData]);
+
     return (
-        <>
+        <div className='w-full flex flex-col items-center gap-4'>
             <div className='flex flex-col justify-center items-center rounded-lg bg-white shadow-xl shadow-black/5 ring-1 ring-slate-700/10'>
                 <div className='flex flex-row space-x-2 py-2 w-full px-2'>
                     <UrlTile
                         icon={<AnchorIcon />}
                         text={"From URL"}
                         onUrlUpdate={(e) => {
-                            props.transcriber.onInputChange();
+                            transcriber.onInputChange();
                             setAudioDownloadUrl(e);
                         }}
                     />
@@ -254,7 +283,7 @@ export function AudioManager(props: { transcriber: Transcriber }) {
                         icon={<FolderIcon />}
                         text={"From file"}
                         onFileUpdate={(decoded, blobUrl, mimeType) => {
-                            props.transcriber.onInputChange();
+                            transcriber.onInputChange();
                             setAudioData({
                                 buffer: decoded,
                                 url: blobUrl,
@@ -270,7 +299,7 @@ export function AudioManager(props: { transcriber: Transcriber }) {
                                 icon={<MicrophoneIcon />}
                                 text={"Record"}
                                 setAudioData={(e) => {
-                                    props.transcriber.onInputChange();
+                                    transcriber.onInputChange();
                                     setAudioFromRecording(e);
                                 }}
                             />
@@ -280,12 +309,15 @@ export function AudioManager(props: { transcriber: Transcriber }) {
                 {
                     <AudioDataBar
                         progress={isAudioLoading ? progress : +!!audioData}
+                        transcribedData={transcribedData}
+                        audioDuration={audioDuration}
                     />
                 }
             </div>
             {audioData && (
                 <>
                     <AudioPlayer
+                        ref={audioRef}
                         audioUrl={audioData.url}
                         mimeType={audioData.mimeType}
                     />
@@ -293,25 +325,26 @@ export function AudioManager(props: { transcriber: Transcriber }) {
                     <div className='relative w-full flex justify-center items-center'>
                         <TranscribeButton
                             onClick={() => {
-                                props.transcriber.start(audioData.buffer);
+                                if (audioRef.current) {
+                                    transcriber.start(audioData.buffer);
+                                }
                             }}
-                            isModelLoading={props.transcriber.isModelLoading}
-                            // isAudioLoading ||
-                            isTranscribing={props.transcriber.isBusy}
+                            isModelLoading={transcriber.isModelLoading}
+                            isTranscribing={transcriber.isBusy}
                         />
 
                         <SettingsTile
                             className='absolute right-4'
-                            transcriber={props.transcriber}
+                            transcriber={transcriber}
                             icon={<SettingsIcon />}
                         />
                     </div>
-                    {props.transcriber.progressItems.length > 0 && (
+                    {transcriber.progressItems.length > 0 && (
                         <div className='relative z-10 p-4 w-full'>
                             <label>
                                 Loading model files... (only run once)
                             </label>
-                            {props.transcriber.progressItems.map((data) => (
+                            {transcriber.progressItems.map((data) => (
                                 <div key={data.file}>
                                     <Progress
                                         text={data.file}
@@ -323,7 +356,7 @@ export function AudioManager(props: { transcriber: Transcriber }) {
                     )}
                 </>
             )}
-        </>
+        </div>
     );
 }
 
@@ -342,16 +375,11 @@ function SettingsTile(props: {
         setShowModal(false);
     };
 
-    const onSubmit = (url: string) => {
-        onClose();
-    };
-
     return (
         <div className={props.className}>
             <Tile icon={props.icon} onClick={onClick} />
             <SettingsModal
                 show={showModal}
-                onSubmit={onSubmit}
                 onClose={onClose}
                 transcriber={props.transcriber}
             />
@@ -361,7 +389,6 @@ function SettingsTile(props: {
 
 function SettingsModal(props: {
     show: boolean;
-    onSubmit: (url: string) => void;
     onClose: () => void;
     transcriber: Transcriber;
 }) {
@@ -378,6 +405,11 @@ function SettingsModal(props: {
         'distil-whisper/distil-medium.en': [402],
         'distil-whisper/distil-large-v2': [767],
     };
+
+    const updateSetting = (key: string, value: any) => {
+        localStorage.setItem(`transcriber_${key}`, JSON.stringify(value));
+    };
+
     return (
         <Modal
             show={props.show}
@@ -390,6 +422,7 @@ function SettingsModal(props: {
                         defaultValue={props.transcriber.model}
                         onChange={(e) => {
                             props.transcriber.setModel(e.target.value);
+                            updateSetting('model', e.target.value);
                         }}
                     >
                         {Object.keys(models)
@@ -405,14 +438,13 @@ function SettingsModal(props: {
                                 )
                             )
                             .map((key) => (
-                                <option key={key} value={key}>{`${key}${
-                                    (props.transcriber.multilingual || key.startsWith('distil-whisper/')) ? "" : ".en"
-                                } (${
+                                <option key={key} value={key}>{`${key}${(props.transcriber.multilingual || key.startsWith('distil-whisper/')) ? "" : ".en"
+                                    } (${
                                     // @ts-ignore
                                     models[key][
-                                        props.transcriber.quantized ? 0 : 1
+                                    props.transcriber.quantized ? 0 : 1
                                     ]
-                                }MB)`}</option>
+                                    }MB)`}</option>
                             ))}
                     </select>
                     <div className='flex justify-between items-center mb-3 px-1'>
@@ -422,9 +454,8 @@ function SettingsModal(props: {
                                 type='checkbox'
                                 checked={props.transcriber.multilingual}
                                 onChange={(e) => {
-                                    props.transcriber.setMultilingual(
-                                        e.target.checked,
-                                    );
+                                    props.transcriber.setMultilingual(e.target.checked);
+                                    updateSetting('multilingual', e.target.checked);
                                 }}
                             ></input>
                             <label htmlFor={"multilingual"} className='ms-1'>
@@ -437,9 +468,8 @@ function SettingsModal(props: {
                                 type='checkbox'
                                 checked={props.transcriber.quantized}
                                 onChange={(e) => {
-                                    props.transcriber.setQuantized(
-                                        e.target.checked,
-                                    );
+                                    props.transcriber.setQuantized(e.target.checked);
+                                    updateSetting('quantized', e.target.checked);
                                 }}
                             ></input>
                             <label htmlFor={"quantize"} className='ms-1'>
@@ -454,9 +484,8 @@ function SettingsModal(props: {
                                 className='mt-1 mb-3 bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500'
                                 defaultValue={props.transcriber.language}
                                 onChange={(e) => {
-                                    props.transcriber.setLanguage(
-                                        e.target.value,
-                                    );
+                                    props.transcriber.setLanguage(e.target.value);
+                                    updateSetting('language', e.target.value);
                                 }}
                             >
                                 {Object.keys(LANGUAGES).map((key, i) => (
@@ -470,9 +499,8 @@ function SettingsModal(props: {
                                 className='mt-1 mb-3 bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500'
                                 defaultValue={props.transcriber.subtask}
                                 onChange={(e) => {
-                                    props.transcriber.setSubtask(
-                                        e.target.value,
-                                    );
+                                    props.transcriber.setSubtask(e.target.value);
+                                    updateSetting('subtask', e.target.value);
                                 }}
                             >
                                 <option value={"transcribe"}>Transcribe</option>
@@ -485,7 +513,7 @@ function SettingsModal(props: {
                 </>
             }
             onClose={props.onClose}
-            onSubmit={() => {}}
+            onSubmit={() => { }}
         />
     );
 }
@@ -494,7 +522,17 @@ function VerticalBar() {
     return <div className='w-[1px] bg-slate-200'></div>;
 }
 
-function AudioDataBar(props: { progress: number }) {
+function AudioDataBar(props: {
+    progress: number;
+    transcribedData?: TranscriberData;
+    audioDuration: number;
+}) {
+    if (props.transcribedData?.isBusy && props.audioDuration && props.transcribedData.chunks.length > 0) {
+        const lastTimestamp = props.transcribedData.chunks[props.transcribedData.chunks.length - 1].timestamp[0];
+        const progress = Math.min(100, (lastTimestamp / props.audioDuration) * 100);
+        return <ProgressBar progress={`${Math.round(progress)}%`} />;
+    }
+
     return <ProgressBar progress={`${Math.round(props.progress * 100)}%`} />;
 }
 
@@ -569,56 +607,237 @@ function UrlModal(props: {
     );
 }
 
+const SUPPORTED_FORMATS = {
+    // Audio formats
+    'audio/mpeg': '.mp3',
+    'audio/wav': '.wav',
+    'audio/ogg': '.ogg',
+    'audio/x-m4a': '.m4a',
+    'audio/aac': '.aac',
+    'audio/webm': '.webm',
+    'audio/x-ms-wma': '.wma',
+    // Video formats
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/ogg': '.ogv',
+    'video/quicktime': '.mov'
+};
+
 function FileTile(props: {
     icon: JSX.Element;
     text: string;
-    onFileUpdate: (
-        decoded: AudioBuffer,
-        blobUrl: string,
-        mimeType: string,
-    ) => void;
+    onFileUpdate: (decoded: AudioBuffer, blobUrl: string, mimeType: string) => void;
 }) {
-    // const audioPlayer = useRef<HTMLAudioElement>(null);
+    const [isConverting, setIsConverting] = useState(false);
+    const [ffmpeg, setFFmpeg] = useState<any>(null);
+    const [conversionProgress, setConversionProgress] = useState(0);
 
     // Create hidden input element
     let elem = document.createElement("input");
     elem.type = "file";
-    elem.oninput = (event) => {
-        // Make sure we have files to use
-        let files = (event.target as HTMLInputElement).files;
-        if (!files) return;
+    elem.accept = Object.values(SUPPORTED_FORMATS).join(',');
 
-        // Create a blob that we can use as an src for our audio element
-        const urlObj = URL.createObjectURL(files[0]);
-        const mimeType = files[0].type;
+    const loadFFmpeg = async () => {
+        try {
+            console.log('Loading FFmpeg...');
+            const ffmpegModule = await import('@ffmpeg/ffmpeg');
+            const { fetchFile } = await import('@ffmpeg/util');
 
-        const reader = new FileReader();
-        reader.addEventListener("load", async (e) => {
-            const arrayBuffer = e.target?.result as ArrayBuffer; // Get the ArrayBuffer
-            if (!arrayBuffer) return;
+            const ffmpegInstance = ffmpegModule.createFFmpeg({
+                log: true,
+                logger: ({ message }) => console.log(message),
+                progress: ({ ratio }) => setConversionProgress(ratio)
+            });
+
+            await ffmpegInstance.load();
+            setFFmpeg(ffmpegInstance);
+            return { ffmpegInstance, fetchFile };
+        } catch (error) {
+            console.error('Failed to load FFmpeg:', error);
+            throw error;
+        }
+    };
+
+    const handleWMAFile = async (file: File) => {
+        console.log('Starting WMA conversion process...');
+        setIsConverting(true);
+
+        try {
+            // Load FFmpeg if not already loaded
+            const { ffmpegInstance, fetchFile } = ffmpeg ?
+                { ffmpegInstance: ffmpeg, fetchFile: (await import('@ffmpeg/util')).fetchFile } :
+                await loadFFmpeg();
+
+            // Write the input file to FFmpeg's virtual filesystem
+            const inputFileName = 'input.wma';
+            const outputFileName = 'output.mp3';
+
+            // Use FS API instead of writeFile
+            ffmpegInstance.FS('writeFile', inputFileName, await fetchFile(file));
+
+            // Run the conversion
+            await ffmpegInstance.run('-i', inputFileName, '-acodec', 'libmp3lame', '-ab', '192k', outputFileName);
+
+            // Read the output file using FS API
+            const data = ffmpegInstance.FS('readFile', outputFileName);
+            const mp3Blob = new Blob([data.buffer], { type: 'audio/mpeg' });
+            console.log('Conversion successful, MP3 size:', mp3Blob.size);
+
+            // Clean up files
+            ffmpegInstance.FS('unlink', inputFileName);
+            ffmpegInstance.FS('unlink', outputFileName);
+
+            // Create URL and decode
+            const urlObj = URL.createObjectURL(mp3Blob);
+            const arrayBuffer = await mp3Blob.arrayBuffer();
+
+            try {
+                const audioCTX = new AudioContext({
+                    sampleRate: Constants.SAMPLING_RATE,
+                });
+
+                const decoded = await audioCTX.decodeAudioData(arrayBuffer);
+                console.log('Successfully decoded audio');
+                props.onFileUpdate(decoded, urlObj, 'audio/mpeg');
+            } catch (decodeError) {
+                console.error('Audio decoding error:', decodeError);
+                throw new Error('Failed to decode converted audio');
+            }
+
+        } catch (error) {
+            console.error('Conversion error:', error);
+            alert('Failed to convert WMA file. Please try another format or convert it manually.');
+        } finally {
+            setIsConverting(false);
+        }
+    };
+
+    const extractAudioFromVideo = async (file: File) => {
+        console.log('Starting video audio extraction...');
+        setIsConverting(true);
+
+        try {
+            const { ffmpegInstance, fetchFile } = ffmpeg ?
+                { ffmpegInstance: ffmpeg, fetchFile: (await import('@ffmpeg/util')).fetchFile } :
+                await loadFFmpeg();
+
+            const inputFileName = 'input_video' + file.name.substring(file.name.lastIndexOf('.'));
+            const outputFileName = 'output.mp3';
+
+            ffmpegInstance.FS('writeFile', inputFileName, await fetchFile(file));
+
+            // Extract audio from video and convert to MP3
+            await ffmpegInstance.run(
+                '-i', inputFileName,
+                '-vn', // Skip video
+                '-acodec', 'libmp3lame',
+                '-ab', '192k',
+                '-ar', '44100',
+                outputFileName
+            );
+
+            const data = ffmpegInstance.FS('readFile', outputFileName);
+            const mp3Blob = new Blob([data.buffer], { type: 'audio/mpeg' });
+            console.log('Audio extraction successful, MP3 size:', mp3Blob.size);
+
+            // Clean up files
+            ffmpegInstance.FS('unlink', inputFileName);
+            ffmpegInstance.FS('unlink', outputFileName);
+
+            const urlObj = URL.createObjectURL(mp3Blob);
+            const arrayBuffer = await mp3Blob.arrayBuffer();
 
             const audioCTX = new AudioContext({
                 sampleRate: Constants.SAMPLING_RATE,
             });
 
             const decoded = await audioCTX.decodeAudioData(arrayBuffer);
+            console.log('Successfully decoded audio');
+            props.onFileUpdate(decoded, urlObj, 'audio/mpeg');
 
-            props.onFileUpdate(decoded, urlObj, mimeType);
+        } catch (error) {
+            console.error('Video processing error:', error);
+            alert('Failed to extract audio from video. Please try another format.');
+        } finally {
+            setIsConverting(false);
+        }
+    };
+
+    elem.onchange = async (event) => {
+        console.log('File selected');
+        let files = (event.target as HTMLInputElement).files;
+        if (!files) {
+            console.log('No files selected');
+            return;
+        }
+
+        const file = files[0];
+        console.log('Selected file:', {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            lastModified: new Date(file.lastModified).toISOString()
         });
-        reader.readAsArrayBuffer(files[0]);
 
-        // Reset files
-        elem.value = "";
+        // Handle video files
+        if (file.type.startsWith('video/')) {
+            console.log('Video file detected, extracting audio...');
+            await extractAudioFromVideo(file);
+            elem.value = '';
+            return;
+        }
+
+        // Handle WMA files
+        if (file.type === 'audio/x-ms-wma' ||
+            file.name.toLowerCase().endsWith('.wma')) {
+            console.log('WMA file detected');
+            await handleWMAFile(file);
+            elem.value = '';
+            return;
+        }
+
+        console.log('Processing as regular audio file...');
+        // Handle other supported formats
+        const urlObj = URL.createObjectURL(file);
+        const mimeType = file.type;
+
+        const reader = new FileReader();
+        reader.addEventListener("load", async (e) => {
+            const arrayBuffer = e.target?.result as ArrayBuffer;
+            if (!arrayBuffer) return;
+
+            try {
+                const audioCTX = new AudioContext({
+                    sampleRate: Constants.SAMPLING_RATE,
+                });
+
+                const decoded = await audioCTX.decodeAudioData(arrayBuffer);
+                props.onFileUpdate(decoded, urlObj, mimeType);
+            } catch (error) {
+                console.error('Audio decoding error:', error);
+                alert('Failed to decode audio file. Please make sure it is a valid audio file.');
+            }
+        });
+        reader.readAsArrayBuffer(file);
+        elem.value = '';
     };
 
     return (
-        <>
+        <div className="relative">
             <Tile
                 icon={props.icon}
-                text={props.text}
-                onClick={() => elem.click()}
+                text={isConverting ? `Converting ${Math.round(conversionProgress * 100)}%` : props.text}
+                onClick={() => !isConverting && elem.click()}
             />
-        </>
+            {isConverting && (
+                <div className="absolute -bottom-1 left-0 right-0 h-1 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-blue-600 transition-all duration-200"
+                        style={{ width: `${Math.round(conversionProgress * 100)}%` }}
+                    />
+                </div>
+            )}
+        </div>
     );
 }
 

@@ -26,10 +26,16 @@ interface TranscriberCompleteData {
     };
 }
 
+export interface TranscriberChunk {
+    text: string;
+    timestamp: [number, number | null];
+    isEdited?: boolean;
+}
+
 export interface TranscriberData {
     isBusy: boolean;
     text: string;
-    chunks: { text: string; timestamp: [number, number | null] }[];
+    chunks: TranscriberChunk[];
 }
 
 export interface Transcriber {
@@ -49,6 +55,20 @@ export interface Transcriber {
     setSubtask: (subtask: string) => void;
     language?: string;
     setLanguage: (language: string) => void;
+    seek?: (time: number) => void;
+    setAudioElement: (element: HTMLAudioElement | null) => void;
+}
+
+function getStoredSetting<T>(key: string, defaultValue: T): T {
+    const stored = localStorage.getItem(`transcriber_${key}`);
+    if (stored !== null) {
+        try {
+            return JSON.parse(stored);
+        } catch (e) {
+            return defaultValue;
+        }
+    }
+    return defaultValue;
 }
 
 export function useTranscriber(): Transcriber {
@@ -77,25 +97,29 @@ export function useTranscriber(): Transcriber {
                 break;
             case "update":
                 // Received partial update
-                // console.log("update", message);
-                // eslint-disable-next-line no-case-declarations
                 const updateMessage = message as TranscriberUpdateData;
-                setTranscript({
+                setTranscript(prevTranscript => ({
                     isBusy: true,
                     text: updateMessage.data[0],
-                    chunks: updateMessage.data[1].chunks,
-                });
+                    chunks: updateMessage.data[1].chunks.map((chunk, i) => ({
+                        ...chunk,
+                        // Preserve isEdited flag from previous chunks if they exist
+                        isEdited: prevTranscript?.chunks[i]?.isEdited || false
+                    }))
+                }));
                 break;
             case "complete":
                 // Received complete transcript
-                // console.log("complete", message);
-                // eslint-disable-next-line no-case-declarations
                 const completeMessage = message as TranscriberCompleteData;
-                setTranscript({
+                setTranscript(prevTranscript => ({
                     isBusy: false,
                     text: completeMessage.data.text,
-                    chunks: completeMessage.data.chunks,
-                });
+                    chunks: completeMessage.data.chunks.map((chunk, i) => ({
+                        ...chunk,
+                        // Preserve isEdited flag from previous chunks if they exist
+                        isEdited: prevTranscript?.chunks[i]?.isEdited || false
+                    }))
+                }));
                 setIsBusy(false);
                 break;
 
@@ -126,16 +150,20 @@ export function useTranscriber(): Transcriber {
         }
     });
 
-    const [model, setModel] = useState<string>(Constants.DEFAULT_MODEL);
-    const [subtask, setSubtask] = useState<string>(Constants.DEFAULT_SUBTASK);
+    const [model, setModel] = useState<string>(
+        getStoredSetting('model', Constants.DEFAULT_MODEL)
+    );
+    const [subtask, setSubtask] = useState<string>(
+        getStoredSetting('subtask', Constants.DEFAULT_SUBTASK)
+    );
     const [quantized, setQuantized] = useState<boolean>(
-        Constants.DEFAULT_QUANTIZED,
+        getStoredSetting('quantized', Constants.DEFAULT_QUANTIZED)
     );
     const [multilingual, setMultilingual] = useState<boolean>(
-        Constants.DEFAULT_MULTILINGUAL,
+        getStoredSetting('multilingual', Constants.DEFAULT_MULTILINGUAL)
     );
     const [language, setLanguage] = useState<string>(
-        Constants.DEFAULT_LANGUAGE,
+        getStoredSetting('language', Constants.DEFAULT_LANGUAGE)
     );
 
     const onInputChange = useCallback(() => {
@@ -178,6 +206,15 @@ export function useTranscriber(): Transcriber {
         [webWorker, model, multilingual, quantized, subtask, language],
     );
 
+    const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+    const seek = useCallback((time: number) => {
+        if (audioElement) {
+            audioElement.currentTime = time;
+            audioElement.play();
+        }
+    }, [audioElement]);
+
     const transcriber = useMemo(() => {
         return {
             onInputChange,
@@ -196,6 +233,8 @@ export function useTranscriber(): Transcriber {
             setSubtask,
             language,
             setLanguage,
+            seek,
+            setAudioElement,
         };
     }, [
         isBusy,
@@ -208,6 +247,7 @@ export function useTranscriber(): Transcriber {
         quantized,
         subtask,
         language,
+        seek,
     ]);
 
     return transcriber;
