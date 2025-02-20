@@ -654,6 +654,9 @@ function FileTile(props: {
             return { ffmpegInstance, fetchFile };
         } catch (error) {
             console.error('Failed to load FFmpeg:', error);
+            if (error instanceof Error && error.toString().includes('SharedArrayBuffer')) {
+                throw new Error('Browser security settings prevent audio conversion. Please try a different audio format or convert the file locally first.');
+            }
             throw error;
         }
     };
@@ -706,7 +709,11 @@ function FileTile(props: {
 
         } catch (error) {
             console.error('Conversion error:', error);
-            alert('Failed to convert WMA file. Please try another format or convert it manually.');
+            if (error instanceof Error && error.message.includes('security settings')) {
+                alert(error.message);
+            } else {
+                alert('Failed to convert WMA file. Please try another format or convert it manually.');
+            }
         } finally {
             setIsConverting(false);
         }
@@ -757,7 +764,11 @@ function FileTile(props: {
 
         } catch (error) {
             console.error('Video processing error:', error);
-            alert('Failed to extract audio from video. Please try another format.');
+            if (error instanceof Error && error.message.includes('security settings')) {
+                alert(error.message);
+            } else {
+                alert('Failed to extract audio from video. Please try another format.');
+            }
         } finally {
             setIsConverting(false);
         }
