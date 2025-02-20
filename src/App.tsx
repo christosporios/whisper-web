@@ -25,16 +25,6 @@ function App() {
                     onSeek={handleSeek}
                 />
             </div>
-
-            <div className='fixed bottom-4 left-1/2 -translate-x-1/2'>
-                Made with{" "}
-                <a
-                    className='underline'
-                    href='https://github.com/xenova/transformers.js'
-                >
-                    🤗 Transformers.js
-                </a>
-            </div>
         </div>
     );
 }
