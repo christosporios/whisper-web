@@ -255,7 +255,26 @@ export default function Transcript({ transcribedData, onSeek }: Props) {
         <div className='mt-8'>
             <div className='flex items-center justify-between mb-2'>
                 <div className='flex items-center gap-4'>
-                    {transcribedData && !transcribedData.isBusy && (
+                    {/* Add loading state indicator */}
+                    {transcribedData?.isModelLoading && (
+                        <div className='flex items-center gap-2 text-sm text-slate-600'>
+                            <div className='w-32 h-2 bg-slate-200 rounded-full overflow-hidden'>
+                                <div
+                                    className='h-full bg-blue-500 rounded-full animate-pulse'
+                                />
+                            </div>
+                            <span>Loading model files...</span>
+                        </div>
+                    )}
+
+                    {/* Add error state display */}
+                    {transcribedData?.error && (
+                        <div className='text-red-500'>
+                            Error: {transcribedData.error}
+                        </div>
+                    )}
+
+                    {transcribedData && !transcribedData.isBusy && !transcribedData.isModelLoading && (
                         <>
                             <button
                                 onClick={exportTXT}

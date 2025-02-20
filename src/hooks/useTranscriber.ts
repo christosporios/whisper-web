@@ -33,9 +33,11 @@ export interface TranscriberChunk {
 }
 
 export interface TranscriberData {
-    isBusy: boolean;
-    text: string;
     chunks: TranscriberChunk[];
+    text: string;
+    isBusy: boolean;
+    isModelLoading: boolean;
+    error?: string;
 }
 
 export interface Transcriber {
@@ -100,6 +102,7 @@ export function useTranscriber(): Transcriber {
                 const updateMessage = message as TranscriberUpdateData;
                 setTranscript(prevTranscript => ({
                     isBusy: true,
+                    isModelLoading: false,
                     text: updateMessage.data[0],
                     chunks: updateMessage.data[1].chunks.map((chunk, i) => ({
                         ...chunk,
@@ -113,6 +116,7 @@ export function useTranscriber(): Transcriber {
                 const completeMessage = message as TranscriberCompleteData;
                 setTranscript(prevTranscript => ({
                     isBusy: false,
+                    isModelLoading: false,
                     text: completeMessage.data.text,
                     chunks: completeMessage.data.chunks.map((chunk, i) => ({
                         ...chunk,
