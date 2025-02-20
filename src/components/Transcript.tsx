@@ -90,8 +90,44 @@ export default function Transcript({ transcribedData, onSeek }: Props) {
         }
     });
 
+    const handleTimeUpdate = (time: number) => {
+        setCurrentTime(time);
+    };
+
+    // Connect to audio element time updates
+    useEffect(() => {
+        const audio = document.querySelector("audio");
+        if (audio) {
+            audioRef.current = audio;
+            audio.playbackRate = playbackSpeed;
+
+            // Set initial values
+            setCurrentTime(audio.currentTime);
+            setAudioDuration(audio.duration || 0);
+
+            const updateTime = () => handleTimeUpdate(audio.currentTime);
+            const updateDuration = () => {
+                setAudioDuration(audio.duration);
+                setCurrentTime(audio.currentTime);
+            };
+
+            audio.addEventListener("timeupdate", updateTime);
+            audio.addEventListener("loadedmetadata", updateDuration);
+            audio.addEventListener("seeking", updateTime);
+
+            return () => {
+                audio.removeEventListener("timeupdate", updateTime);
+                audio.removeEventListener("loadedmetadata", updateDuration);
+                audio.removeEventListener("seeking", updateTime);
+            };
+        }
+    }, [playbackSpeed]);
+
     const handleUtteranceClick = (timestamp: number) => {
-        onSeek?.(timestamp);
+        if (onSeek) {
+            onSeek(timestamp);
+            setCurrentTime(timestamp);
+        }
     };
 
     const getCurrentUtteranceIndex = () => {
@@ -222,35 +258,6 @@ export default function Transcript({ transcribedData, onSeek }: Props) {
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [transcribedData, currentTime, editingIndex]);
 
-    const handleTimeUpdate = (time: number) => {
-        setCurrentTime(time);
-    };
-
-    // Connect to audio element time updates
-    useEffect(() => {
-        const audio = document.querySelector("audio");
-        if (audio) {
-            audioRef.current = audio;
-            audio.playbackRate = playbackSpeed;
-
-            // Set initial duration if already loaded
-            if (audio.duration) {
-                setAudioDuration(audio.duration);
-            }
-
-            const updateTime = () => handleTimeUpdate(audio.currentTime);
-            const updateDuration = () => setAudioDuration(audio.duration);
-
-            audio.addEventListener("timeupdate", updateTime);
-            audio.addEventListener("loadedmetadata", updateDuration);
-
-            return () => {
-                audio.removeEventListener("timeupdate", updateTime);
-                audio.removeEventListener("loadedmetadata", updateDuration);
-            };
-        }
-    }, [playbackSpeed]);
-
     return (
         <div className='mt-8'>
             <div className='flex items-center justify-between mb-2'>
@@ -323,8 +330,12 @@ export default function Transcript({ transcribedData, onSeek }: Props) {
                 <div className='prose max-w-none text-lg'>
                     {transcribedData?.chunks &&
                         transcribedData.chunks.map((chunk, i) => {
-                            const isPlaying = currentTime >= chunk.timestamp[0] &&
-                                (i === transcribedData.chunks.length - 1 || currentTime < transcribedData.chunks[i + 1].timestamp[0]);
+                            const start = chunk.timestamp[0];
+                            const end = i < transcribedData.chunks.length - 1
+                                ? transcribedData.chunks[i + 1].timestamp[0]
+                                : (chunk.timestamp[1] || audioDuration);
+
+                            const isPlaying = currentTime >= start && currentTime < end;
                             const isEditing = i === editingIndex;
 
                             if (isEditing) {
@@ -350,7 +361,7 @@ export default function Transcript({ transcribedData, onSeek }: Props) {
                                         ${chunk.isEdited ? 'text-green-600 underline decoration-green-600 underline-offset-4' : ''}`}
                                     title={formatAudioTimestamp(chunk.timestamp[0])}
                                 >
-                                    {chunk.text}
+                                    {chunk.text}{' '}
                                 </span>
                             );
                         })}

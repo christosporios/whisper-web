@@ -74,9 +74,13 @@ function getStoredSetting<T>(key: string, defaultValue: T): T {
 }
 
 export function useTranscriber(): Transcriber {
-    const [transcript, setTranscript] = useState<TranscriberData | undefined>(
-        undefined,
-    );
+    const [transcript, setTranscript] = useState<TranscriberData | undefined>(() => ({
+        chunks: [],
+        text: '',
+        isBusy: false,
+        isModelLoading: false,
+        error: undefined
+    }));
     const [isBusy, setIsBusy] = useState(false);
     const [isModelLoading, setIsModelLoading] = useState(false);
 
@@ -105,8 +109,8 @@ export function useTranscriber(): Transcriber {
                     isModelLoading: false,
                     text: updateMessage.data[0],
                     chunks: updateMessage.data[1].chunks.map((chunk, i) => ({
-                        ...chunk,
-                        // Preserve isEdited flag from previous chunks if they exist
+                        text: chunk.text,
+                        timestamp: chunk.timestamp,
                         isEdited: prevTranscript?.chunks[i]?.isEdited || false
                     }))
                 }));
@@ -119,8 +123,8 @@ export function useTranscriber(): Transcriber {
                     isModelLoading: false,
                     text: completeMessage.data.text,
                     chunks: completeMessage.data.chunks.map((chunk, i) => ({
-                        ...chunk,
-                        // Preserve isEdited flag from previous chunks if they exist
+                        text: chunk.text,
+                        timestamp: chunk.timestamp,
                         isEdited: prevTranscript?.chunks[i]?.isEdited || false
                     }))
                 }));
@@ -137,9 +141,12 @@ export function useTranscriber(): Transcriber {
                 break;
             case "error":
                 setIsBusy(false);
-                alert(
-                    `${message.data.message} This is most likely because you are using Safari on an M1/M2 Mac. Please try again from Chrome, Firefox, or Edge.\n\nIf this is not the case, please file a bug report.`,
-                );
+                setTranscript(prev => ({
+                    ...(prev || { chunks: [], text: '' }),
+                    isBusy: false,
+                    isModelLoading: false,
+                    error: `${message.data.message} This is most likely because you are using Safari on an M1/M2 Mac. Please try again from Chrome, Firefox, or Edge.\n\nIf this is not the case, please file a bug report.`
+                }));
                 break;
             case "done":
                 // Model file loaded: remove the progress item from the list.
@@ -171,7 +178,13 @@ export function useTranscriber(): Transcriber {
     );
 
     const onInputChange = useCallback(() => {
-        setTranscript(undefined);
+        setTranscript({
+            chunks: [],
+            text: '',
+            isBusy: false,
+            isModelLoading: false,
+            error: undefined
+        });
     }, []);
 
     const postRequest = useCallback(
